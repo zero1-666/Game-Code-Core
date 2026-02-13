@@ -4,10 +4,10 @@ using UnityEngine;
 public class PlayerInteraction : MonoBehaviour
 {
     [Header("搬运设置")]
-    public float interactRange = 5.0f;     // 探测距离
-    public float detectRadius = 0.5f;     // 判定半径
-    public Transform holdPoint;           // 物品吸附点
-    public float carrySpeedMultiplier = 0.8f;
+    public float interactRange = 1.5f;     // 探测点距离玩家正前方的距离
+    public float detectRadius = 0.8f;      // 判定球体的半径
+    public Transform holdPoint;            // 物品吸附点
+    public LayerMask itemLayer;           // 建议在 Inspector 中选为 "Crate" 所在的层
 
     [Header("牺牲设置")]
     public float sacrificeHoldTime = 1.0f;
@@ -19,11 +19,9 @@ public class PlayerInteraction : MonoBehaviour
     [SerializeField] private int hp = 3;
     private float currentHoldTime = 0;
     private bool isSacrificing = false;
-    private Camera mainCam;
 
     void Start()
     {
-        mainCam = Camera.main;
         if (spawnPoint == null) Debug.LogError("请分配 Spawn Point (重生点)！");
         if (holdPoint == null) Debug.LogError("请分配 Hold Point (吸附点)！");
     }
@@ -33,35 +31,36 @@ public class PlayerInteraction : MonoBehaviour
         // --- 1. 搬运逻辑 (F键) ---
         if (Input.GetKeyDown(KeyCode.F))
         {
-            if (grabbedItem == null) TryPickUp();
-            else DropItem();
+            if (grabbedItem == null)
+            {
+                TryPickUp();
+            }
+            else
+            {
+                DropItem();
+            }
         }
 
         // --- 2. 牺牲逻辑 (空格键) ---
         HandleSacrificeInput();
-
-        // --- 3. 调试射线 (Scene窗口可见) ---
-        if (mainCam != null)
-        {
-            Vector3 rayStart = mainCam.transform.position + mainCam.transform.forward * 2.5f;
-            Debug.DrawRay(rayStart, mainCam.transform.forward * interactRange, Color.green);
-        }
     }
 
-    // --- 搬运功能核心 ---
+    // --- 搬运功能核心：正前方范围检测版 ---
     void TryPickUp()
     {
-        if (mainCam == null) return;
+        // 计算检测中心点：位于玩家正前方
+        Vector3 detectCenter = transform.position + transform.forward * interactRange;
 
-        // 关键：从相机前方 2.5 米处发射，彻底跳过 Player 身体
-        Vector3 origin = mainCam.transform.position + mainCam.transform.forward * 2.5f;
-        RaycastHit hit;
+        // 使用物理重叠球检测范围内的所有物体
+        Collider[] hitColliders = Physics.OverlapSphere(detectCenter, detectRadius);
 
-        if (Physics.SphereCast(origin, detectRadius, mainCam.transform.forward, out hit, interactRange))
+        foreach (var hit in hitColliders)
         {
-            if (hit.collider.CompareTag("Crate"))
+            // 检查是否带有 Crate 标签
+            if (hit.CompareTag("Crate"))
             {
-                grabbedItem = hit.collider.gameObject;
+                grabbedItem = hit.gameObject;
+
                 Rigidbody rb = grabbedItem.GetComponent<Rigidbody>();
                 if (rb != null)
                 {
@@ -69,14 +68,19 @@ public class PlayerInteraction : MonoBehaviour
                     rb.useGravity = false;
                 }
 
-                // 禁用碰撞防止搬运时把人弹飞
-                if (grabbedItem.TryGetComponent<Collider>(out Collider col)) col.enabled = false;
+                // 禁用碰撞，防止搬运时产生物理冲突导致玩家“飞天”
+                if (grabbedItem.TryGetComponent<Collider>(out Collider col))
+                {
+                    col.enabled = false;
+                }
 
+                // 父子级关联
                 grabbedItem.transform.SetParent(holdPoint);
                 grabbedItem.transform.localPosition = Vector3.zero;
                 grabbedItem.transform.localRotation = Quaternion.identity;
 
-                Debug.Log("已拾取箱子：速度降至80%");
+                Debug.Log("<color=cyan>【系统】已捡起物体：" + grabbedItem.name + "</color>");
+                break; // 确保一次只捡一个
             }
         }
     }
@@ -85,8 +89,13 @@ public class PlayerInteraction : MonoBehaviour
     {
         if (grabbedItem != null)
         {
-            if (grabbedItem.TryGetComponent<Collider>(out Collider col)) col.enabled = true;
+            // 恢复碰撞
+            if (grabbedItem.TryGetComponent<Collider>(out Collider col))
+            {
+                col.enabled = true;
+            }
 
+            // 恢复物理模拟
             Rigidbody rb = grabbedItem.GetComponent<Rigidbody>();
             if (rb != null)
             {
@@ -96,7 +105,7 @@ public class PlayerInteraction : MonoBehaviour
 
             grabbedItem.transform.SetParent(null);
             grabbedItem = null;
-            Debug.Log("箱子已放下");
+            Debug.Log("<color=yellow>【系统】物体已放下</color>");
         }
     }
 
@@ -140,7 +149,6 @@ public class PlayerInteraction : MonoBehaviour
     {
         hp -= 1;
 
-        // 寻找附近的坑位并生成桥梁
         Collider[] voids = Physics.OverlapSphere(transform.position, 2.0f);
         foreach (var v in voids)
         {
@@ -150,16 +158,27 @@ public class PlayerInteraction : MonoBehaviour
                 {
                     Instantiate(bridgePrefab, v.transform.position, v.transform.rotation);
                 }
-                Destroy(v.gameObject); // 坑位消失，路面生成
+                Destroy(v.gameObject);
                 break;
             }
         }
 
-        // 重生逻辑
         if (spawnPoint != null) transform.position = spawnPoint.position;
 
         currentHoldTime = 0;
         isSacrificing = false;
-        Debug.Log("<color=red>牺牲完成！</color> 剩余存在值: " + hp);
+        Debug.Log("<color=red>【核心】牺牲完成！</color> 剩余存在值: " + hp);
+    }
+
+    // 负责人在 Scene 窗口可视化调试范围
+    void OnDrawGizmosSelected()
+    {
+        Gizmos.color = Color.cyan;
+        Vector3 detectCenter = transform.position + transform.forward * interactRange;
+        Gizmos.DrawWireSphere(detectCenter, detectRadius);
+
+        // 画出牺牲判定范围
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(transform.position, 1.5f);
     }
 }
