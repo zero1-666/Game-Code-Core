@@ -16,9 +16,21 @@ public class PlayerInteraction : MonoBehaviour
 
     [Header("实时状态")]
     [SerializeField] private GameObject grabbedItem;
-    [SerializeField] private int hp = 3;
-    private float currentHoldTime = 0;
-    private bool isSacrificing = false;
+    [SerializeField] public int hp = 3;
+    public float currentHoldTime = 0;
+    public bool isSacrificing = false;
+
+    //-----------新增------------
+    [Header("蓄力投掷设置")]
+    public float minThrowForce = 2.0f;       // 基础放下力度
+    public float maxThrowForce = 15.0f;      // 最大投掷力度
+    public float maxChargeTime = 2.0f;       // 蓄力满额所需时间
+    public LineRenderer aimLine;             // 抛物线预览组件 (需手动拖入)
+
+    // --- 新增变量 ---
+    public float currentThrowCharge = 0f;   // 当前蓄力计时
+    public bool isChargingThrow = false;    // 是否正在蓄力
+    //------------------------
 
     void Start()
     {
@@ -29,20 +41,11 @@ public class PlayerInteraction : MonoBehaviour
     void Update()
     {
         // --- 1. 搬运逻辑 (F键) ---
-        if (Input.GetKeyDown(KeyCode.F))
-        {
-            if (grabbedItem == null)
-            {
-                TryPickUp();
-            }
-            else
-            {
-                DropItem();
-            }
-        }
+        // 调用独立的处理函数，保持 Update 清洁
+        HandleThrowInput();
 
-        // --- 2. 牺牲逻辑 (空格键) ---
-        HandleSacrificeInput();
+            // --- 2. 牺牲逻辑 (空格键) ---
+            HandleSacrificeInput();
     }
 
     // --- 搬运功能核心：正前方范围检测版 ---
@@ -85,29 +88,6 @@ public class PlayerInteraction : MonoBehaviour
         }
     }
 
-    void DropItem()
-    {
-        if (grabbedItem != null)
-        {
-            // 恢复碰撞
-            if (grabbedItem.TryGetComponent<Collider>(out Collider col))
-            {
-                col.enabled = true;
-            }
-
-            // 恢复物理模拟
-            Rigidbody rb = grabbedItem.GetComponent<Rigidbody>();
-            if (rb != null)
-            {
-                rb.isKinematic = false;
-                rb.useGravity = true;
-            }
-
-            grabbedItem.transform.SetParent(null);
-            grabbedItem = null;
-            Debug.Log("<color=yellow>【系统】物体已放下</color>");
-        }
-    }
 
     // --- 牺牲功能核心 ---
     void HandleSacrificeInput()
@@ -181,4 +161,114 @@ public class PlayerInteraction : MonoBehaviour
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(transform.position, 1.5f);
     }
+
+    //------------------新增---------------
+    // 处理交互输入的逻辑划分
+    // 逻辑划分：严格区分拾取与投掷蓄力的两个阶段
+    private void HandleThrowInput()
+    {
+        // 情况 A: 手上没东西 -> 只能捡起
+        if (grabbedItem == null)
+        {
+            if (Input.GetKeyDown(KeyCode.F))
+            {
+                TryPickUp();
+            }
+            return; // 捡起后直接结束本帧，防止同一帧触发下面的逻辑
+        }
+
+        // 情况 B: 手上有东西 -> 等待玩家"再次"按下 F
+        // Input.GetKeyDown 只有在玩家松开 F 并再次按下时才会触发
+        if (Input.GetKeyDown(KeyCode.F))
+        {
+            isChargingThrow = true; // 开始蓄力标记
+            currentThrowCharge = 0f;
+            if (aimLine != null) aimLine.enabled = true; // 开启抛物线
+        }
+
+        // 情况 C: 正在蓄力中 (按住 F 不放)
+        if (isChargingThrow && Input.GetKey(KeyCode.F))
+        {
+            currentThrowCharge += Time.deltaTime;
+            currentThrowCharge = Mathf.Clamp(currentThrowCharge, 0, maxChargeTime);
+
+            // 实时更新抛物线
+            if (aimLine != null) UpdateAimLine();
+        }
+
+        // 情况 D: 松开 F 键 -> 执行投掷
+        if (isChargingThrow && Input.GetKeyUp(KeyCode.F))
+        {
+            ExecuteThrow();
+        }
+    }
+
+    // 执行投掷逻辑：应用物理冲量
+    private void ExecuteThrow()
+    {
+        if (grabbedItem != null)
+        {
+            Rigidbody rb = grabbedItem.GetComponent<Rigidbody>();
+            Collider col = grabbedItem.GetComponent<Collider>();
+
+            // 1. 解除父子关系
+            grabbedItem.transform.SetParent(null);
+
+            // 2. 【关键修复】强制恢复碰撞体
+            // 如果 IsTrigger 是 true，箱子就是幽灵，会穿地。必须设为 false！
+            if (col != null)
+            {
+                col.isTrigger = false;
+                col.enabled = true;
+            }
+
+            // 3. 【关键修复】恢复刚体物理
+            if (rb != null)
+            {
+                rb.isKinematic = false; // 让物理引擎接管
+                rb.useGravity = true;   // 开启重力
+                rb.collisionDetectionMode = CollisionDetectionMode.Continuous; // 防止速度太快穿地
+
+                // 4. 施加投掷力
+                float chargePercent = currentThrowCharge / maxChargeTime;
+                float finalForce = Mathf.Lerp(minThrowForce, maxThrowForce, chargePercent);
+                Vector3 throwDir = (transform.forward + transform.up * 0.5f).normalized;
+
+                rb.AddForce(throwDir * finalForce, ForceMode.Impulse);
+            }
+
+            grabbedItem = null; // 清空引用
+        }
+
+        // 状态重置
+        isChargingThrow = false;
+        currentThrowCharge = 0;
+        if (aimLine != null) aimLine.enabled = false;
+    }
+
+    // 逻辑划分：物理预测逻辑，用于实时绘制投掷路径
+    private void UpdateAimLine()
+    {
+        int resolution = 30; // 抛物线的精细度（点数）
+        aimLine.positionCount = resolution;
+
+        // 计算初始速度向量（模拟 ExecuteThrow 里的逻辑）
+        float chargePercent = currentThrowCharge / maxChargeTime;
+        float finalForce = Mathf.Lerp(minThrowForce, maxThrowForce, chargePercent);
+        // ForceMode.Impulse 下，速度变化量 = 力 / 质量 (假设质量为1)
+        Vector3 velocity = (transform.forward + Vector3.up * 0.5f).normalized * finalForce;
+
+        Vector3 startPosition = holdPoint.position;
+        float timeStep = 0.1f; // 每个点之间的时间间隔
+
+        for (int i = 0; i < resolution; i++)
+        {
+            float t = i * timeStep;
+            // 物理公式：位移 = 初始速度 * 时间 + 0.5 * 重力 * 时间的平方
+            Vector3 point = startPosition + velocity * t + 0.5f * Physics.gravity * t * t;
+            aimLine.SetPosition(i, point);
+        }
+    }
+    //-------------------------------------
+
 }
