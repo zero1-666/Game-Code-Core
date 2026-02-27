@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.SceneManagement; // [yangxt]用于重置关卡
 
 [RequireComponent(typeof(CharacterController))]
 public class PlayerInteraction : MonoBehaviour
@@ -12,7 +13,10 @@ public class PlayerInteraction : MonoBehaviour
     [Header("牺牲设置")]
     public float sacrificeHoldTime = 1.0f;
     public GameObject bridgePrefab;
-    public Transform spawnPoint;
+
+    //[yangxt]将 Transform 改为 Vector3 类型
+    [Header("检查点系统")]
+    public Vector3 spawnPoint;
 
     [Header("实时状态")]
     [SerializeField] private GameObject grabbedItem;
@@ -21,12 +25,18 @@ public class PlayerInteraction : MonoBehaviour
     private bool isSacrificing = false;
     private Camera mainCam;
 
+  
     void Start()
     {
         mainCam = Camera.main;
-        if (spawnPoint == null) Debug.LogError("请分配 Spawn Point (重生点)！");
+
+        // 【yangxt】初始化 spawnPoint 为游戏开始时玩家的初始位置
+        spawnPoint = transform.position;
+
         if (holdPoint == null) Debug.LogError("请分配 Hold Point (吸附点)！");
     }
+
+
 
     void Update()
     {
@@ -47,6 +57,26 @@ public class PlayerInteraction : MonoBehaviour
             Debug.DrawRay(rayStart, mainCam.transform.forward * interactRange, Color.green);
         }
     }
+
+    //[yangxt]新增功能：生命值管理和死亡重置
+    public void TakeDamage(int amount)
+    {
+        hp -= amount;
+        Debug.Log("受到伤害！当前HP: " + hp);
+
+        if (hp <= 0)
+        {
+            Die();
+        }
+    }
+
+    void Die()
+    {
+        Debug.Log("<color=red>玩家死亡！重置关卡...</color>");
+        // 【yangxt】根据任务要求，调用 SceneManager 重新加载当前激活的场景
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+
 
     // --- 搬运功能核心 ---
     void TryPickUp()
@@ -138,7 +168,8 @@ public class PlayerInteraction : MonoBehaviour
 
     void ExecuteSacrifice()
     {
-        hp -= 1;
+        //[yangxt]调用统一的扣血逻辑
+        TakeDamage(1);
 
         // 寻找附近的坑位并生成桥梁
         Collider[] voids = Physics.OverlapSphere(transform.position, 2.0f);
@@ -155,8 +186,8 @@ public class PlayerInteraction : MonoBehaviour
             }
         }
 
-        // 重生逻辑
-        if (spawnPoint != null) transform.position = spawnPoint.position;
+        // [yangxt]重生位置现在使用记录的 Vector3 spawnPoint
+        if (hp > 0) transform.position = spawnPoint;
 
         currentHoldTime = 0;
         isSacrificing = false;
