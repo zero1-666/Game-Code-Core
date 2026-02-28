@@ -140,6 +140,14 @@ public class PlayerInteraction : MonoBehaviour
     {
         hp -= 1;
 
+        //[yangxt]牺牲时通知移动脚本触发抖动
+        PlayerMovement pm = GetComponent<PlayerMovement>();
+        if (pm != null)
+        {
+            // 参数：持续0.5秒，强度0.2
+            pm.TriggerShake(0.5f, 0.2f);
+        }
+
         // 寻找附近的坑位并生成桥梁
         Collider[] voids = Physics.OverlapSphere(transform.position, 2.0f);
         foreach (var v in voids)
@@ -154,9 +162,6 @@ public class PlayerInteraction : MonoBehaviour
                 break;
             }
         }
-
-        // 重生逻辑
-        if (spawnPoint != null) transform.position = spawnPoint.position;
 
         currentHoldTime = 0;
         isSacrificing = false;
