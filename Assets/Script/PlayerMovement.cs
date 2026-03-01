@@ -15,6 +15,12 @@ public class PlayerMovement : MonoBehaviour
     public Vector3 cameraOffset = new Vector3(0, 2, -4); // 对应你之前的偏移
     public float smoothSpeed = 0.125f;
 
+    //[yangxt]新增：视觉辅助设置：
+    [Header("蓄力视觉辅助")]
+    public Vector3 chargingOffset = new Vector3(0, 3.5f, -2.5f); // 蓄力时更高、更近
+    public float zoomSpeed = 5f; // 视角过渡速度
+    private PlayerInteraction interaction; // 引用交互脚本获取蓄力状态
+
     private CharacterController controller;
     private Vector3 velocity;
     private float xRotation = 0f;
@@ -23,6 +29,7 @@ public class PlayerMovement : MonoBehaviour
     void Start()
     {
         controller = GetComponent<CharacterController>();
+        interaction = GetComponent<PlayerInteraction>(); // [yangxt]获取引用
         Cursor.lockState = CursorLockMode.Locked;
 
         // 自动初始化相机位置
@@ -48,6 +55,9 @@ public class PlayerMovement : MonoBehaviour
         if (playerCamera != null)
         {
             playerCamera.localRotation = Quaternion.Euler(xRotation, 0, 0);
+            //[yayngxt]新增：处理相机蓄力偏移
+            Vector3 targetOffset = interaction.isChargingThrow ? chargingOffset : cameraOffset;
+            playerCamera.localPosition = Vector3.Lerp(playerCamera.localPosition, targetOffset, Time.deltaTime * zoomSpeed);
         }
 
         // 2. 移动逻辑
