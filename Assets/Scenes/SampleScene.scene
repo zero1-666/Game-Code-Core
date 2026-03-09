@@ -1712,7 +1712,7 @@ MonoBehaviour:
   bridgePrefab: {fileID: 2403582991375031917, guid: a1c2ab890a03d614aa424d60774ea03f, type: 3}
   spawnPoint: {x: 0, y: 0, z: 0}
   grabbedItem: {fileID: 0}
-  hp: 3
+  hp: 2
   currentHoldTime: 0
   isSacrificing: 0
   minThrowForce: 2
