@@ -1,31 +1,35 @@
-using UnityEngine;
+ï»¿using UnityEngine;
 
 [RequireComponent(typeof(CharacterController))]
 public class PlayerInteraction : MonoBehaviour
 {
-    [Header("½»»¥ÉèÖÃ")]
+    [Header("äº¤äº’è®¾ç½®")]
     public float interactRange = 1.5f;
     public float detectRadius = 0.8f;
     public Transform holdPoint;
     public LayerMask itemLayer;
 
-    [Header("ÎşÉü»úÖÆ")]
+    [Header("ç‰ºç‰²æœºåˆ¶")]
     public float sacrificeHoldTime = 1.0f;
     public GameObject bridgePrefab;
 
-    [Header("ÖØÉúµãÏµÍ³")]
+    [Header("é‡ç”Ÿç‚¹ç³»ç»Ÿ")]
     public Vector3 spawnPoint;
 
-    [Header("ÊµÊ±×´Ì¬")]
+    [Header("å®æ—¶çŠ¶æ€")]
     [SerializeField] private GameObject grabbedItem;
     [SerializeField] public int hp = 3;
     public float currentHoldTime = 0;
     public bool isSacrificing = false;
 
-    // ĞÂÔö£ºËÀÍö×´Ì¬±ê¼Ç
+    // è™šç©ºåŒºåŸŸæ£€æµ‹ï¼ˆä½¿ç”¨Triggerï¼‰
+    private bool isInVoidZone = false;
+    private Collider currentVoidCollider = null;
+
+    // æ­»äº¡çŠ¶æ€æ ‡è®°
     private bool isDead = false;
 
-    [Header("Í¶ÖÀĞîÁ¦ÏµÍ³")]
+    [Header("æŠ•æ·è“„åŠ›ç³»ç»Ÿ")]
     public float minThrowForce = 2.0f;
     public float maxThrowForce = 15.0f;
     public float maxChargeTime = 2.0f;
@@ -36,10 +40,30 @@ public class PlayerInteraction : MonoBehaviour
 
     void Start()
     {
-        spawnPoint = transform.position;
-        isDead = false;
+        // å¦‚æœå¯ç”¨äº†æ£€æŸ¥ç‚¹ç³»ç»Ÿä¸” spawnPoint æœªè®¾ç½®ï¼Œè‡ªåŠ¨å¯»æ‰¾èµ·å§‹æ£€æŸ¥ç‚¹
+        if (spawnPoint == Vector3.zero)
+        {
+            GameObject startPoint = GameObject.Find("Start_SpawnPoint")
+                ?? GameObject.Find("Checkpoint_01")
+                ?? GameObject.Find("Checkpoint_Start");
 
-        if (holdPoint == null) Debug.LogError("ÇëÉèÖÃ Hold Point");
+            if (startPoint != null)
+            {
+                spawnPoint = startPoint.transform.position;
+                Debug.Log($"åˆå§‹é‡ç”Ÿç‚¹è®¾ç½®è‡ªï¼š{startPoint.name}");
+            }
+            else
+            {
+                // å¦‚æœæ²¡æœ‰æ‰¾åˆ°æ£€æŸ¥ç‚¹ï¼Œä½¿ç”¨å½“å‰ä½ç½®
+                spawnPoint = transform.position;
+            }
+        }
+
+        isDead = false;
+        isInVoidZone = false;
+        currentVoidCollider = null;
+
+        if (holdPoint == null) Debug.LogError("è¯·è®¾ç½® Hold Point");
 
         if (UIManager.Instance != null)
         {
@@ -49,20 +73,62 @@ public class PlayerInteraction : MonoBehaviour
 
     void Update()
     {
-        // Èç¹ûÒÑËÀÍö£¬½ûÖ¹ËùÓĞ²Ù×÷
+        // å¦‚æœå·²æ­»äº¡ï¼Œç¦æ­¢æ‰€æœ‰æ“ä½œ
         if (isDead) return;
 
-        // Èç¹ûGameOverÃæ°åÒÑ¼¤»î£¬Ò²½ûÖ¹²Ù×÷£¨Ë«ÖØ±£ÏÕ£©
+        // å¦‚æœGameOveré¢æ¿å·²æ¿€æ´»ï¼Œä¹Ÿç¦æ­¢æ“ä½œï¼ˆåŒé‡ä¿é™©ï¼‰
         if (UIManager.Instance != null && UIManager.Instance.gameOverPanel.activeSelf) return;
+
+        // ğŸ”´ å…³é”®ä¿®å¤ï¼šå¦‚æœè®°å½•çš„ Void å·²è¢«é”€æ¯ï¼ˆå¦‚è¢«ç®±å­å¡«è¡¥ï¼‰ï¼Œä½†çŠ¶æ€æœªé‡ç½®ï¼Œè‡ªåŠ¨æ¸…ç†
+        if (currentVoidCollider == null && isInVoidZone)
+        {
+            isInVoidZone = false;
+            ResetSacrificeProgress();
+        }
 
         HandleThrowInput();
         HandleSacrificeInput();
     }
 
-    // --- ÉúÃüÖµÂß¼­ ---
+    // --- æ£€æŸ¥ç‚¹ç³»ç»Ÿæ ¸å¿ƒæ–¹æ³• ---
+    /// <summary>
+    /// æ›´æ–°é‡ç”Ÿç‚¹ä½ç½®ï¼ˆä¾› Checkpoint.cs è°ƒç”¨ï¼‰
+    /// </summary>
+    public void UpdateSpawnPoint(Vector3 newPosition)
+    {
+        spawnPoint = newPosition;
+        Debug.Log($"<color=green>é‡ç”Ÿç‚¹å·²æ›´æ–°è‡³ï¼š{newPosition}</color>");
+    }
+
+    // --- Trigger æ£€æµ‹ï¼ˆVoid åŒºåŸŸï¼‰---
+    void OnTriggerEnter(Collider other)
+    {
+        if (other.CompareTag("Void"))
+        {
+            isInVoidZone = true;
+            currentVoidCollider = other;
+
+            // å¯é€‰ï¼šæç¤ºç©å®¶å¯ä»¥ç‰ºç‰²
+            if (UIManager.Instance != null && hp > 1)
+            {
+                UIManager.Instance.ShowHint("æŒ‰ä½ç©ºæ ¼ç‰ºç‰²ç”Ÿå‘½å€¼å»ºé€ æ¡¥æ¢");
+            }
+        }
+    }
+
+    void OnTriggerExit(Collider other)
+    {
+        if (other.CompareTag("Void"))
+        {
+            isInVoidZone = false;
+            currentVoidCollider = null;
+            ResetSacrificeProgress();
+        }
+    }
+
+    // --- ç”Ÿå‘½å€¼é€»è¾‘ ---
     public void TakeDamage(int amount)
     {
-        // ËÀÍöºó²»ÔÙ¿ÛÑª
         if (isDead) return;
 
         hp -= amount;
@@ -80,41 +146,47 @@ public class PlayerInteraction : MonoBehaviour
 
     void Die()
     {
-        if (isDead) return; // ·ÀÖ¹ÖØ¸´µ÷ÓÃ
+        if (isDead) return;
         isDead = true;
 
-        Debug.Log("<color=red>Íæ¼ÒÒÑËÀÍö</color>");
+        Debug.Log("<color=red>ç©å®¶å·²æ­»äº¡</color>");
 
-        // ½ûÓÃ½ÇÉ«¿ØÖÆÆ÷£¨·ÀÖ¹¼ÌĞøÒÆ¶¯/×¹Âä£©
+        // ç¦ç”¨è§’è‰²æ§åˆ¶å™¨
         CharacterController cc = GetComponent<CharacterController>();
         if (cc != null) cc.enabled = false;
 
-        // Èç¹ûÓĞ¸ÕÌå£¬Ò²½ûÓÃ
+        // å¦‚æœæœ‰åˆšä½“ï¼Œä¹Ÿç¦ç”¨
         Rigidbody rb = GetComponent<Rigidbody>();
         if (rb != null) rb.isKinematic = true;
 
-        // ´¥·¢ÑÓ³ÙÏÔÊ¾µÄGameOver
+        // è§¦å‘å»¶è¿Ÿæ˜¾ç¤ºçš„GameOver
         if (UIManager.Instance != null)
         {
             UIManager.Instance.TriggerGameOver();
         }
     }
 
-    // --- ÎşÉüÂß¼­£¨ĞŞ¸Äºó£©---
+    // --- ç‰ºç‰²é€»è¾‘ï¼ˆå·²ä¿®å¤ï¼‰---
     void HandleSacrificeInput()
     {
-        bool nearVoid = IsNearVoid();
+        // ğŸ”´ å…³é”®ä¿®å¤ï¼šå¦‚æœ Void è¢«é”€æ¯äº†ï¼ˆcurrentVoidColliderä¸ºnullï¼‰ï¼Œå¼ºåˆ¶é€€å‡ºç‰ºç‰²çŠ¶æ€
+        if (currentVoidCollider == null && isInVoidZone)
+        {
+            isInVoidZone = false;
+            ResetSacrificeProgress();
+            return; // ç›´æ¥è¿”å›ï¼Œä¸æ‰§è¡Œåç»­é€»è¾‘
+        }
 
-        if (nearVoid && grabbedItem == null)
+        if (isInVoidZone && grabbedItem == null)
         {
             if (Input.GetKey(KeyCode.Space))
             {
-                // HPÎª1Ê±µÄÌØÊâ´¦Àí£ºÔÊĞíÎşÉü£¬µ«ÏÔÊ¾ÁÙÖÕ¾¯¸æ
+                // HPä¸º1æ—¶çš„ä¸´ç»ˆè­¦å‘Š
                 if (hp == 1 && currentHoldTime == 0)
                 {
                     if (UIManager.Instance != null)
                     {
-                        UIManager.Instance.ShowHint("¾¯¸æ£ºÕâ½«ÏûºÄÄã×îºóµÄÉúÃü£¡");
+                        UIManager.Instance.ShowHint("è­¦å‘Šï¼šè¿™å°†æ¶ˆè€—ä½ æœ€åçš„ç”Ÿå‘½ï¼");
                     }
                 }
 
@@ -138,11 +210,24 @@ public class PlayerInteraction : MonoBehaviour
 
     void ExecuteSacrifice()
     {
-        TakeDamage(1); // ¿ÛÑª²¢×Ô¶¯¸üĞÂ UI ÏÔÊ¾
+        TakeDamage(1);
 
-        // Ö»ÓĞ»î×ÅµÄÊ±ºò²ÅÖ´ĞĞ´«ËÍºÍÔìÇÅ£¨Èç¹û¿ÛÑªµ¼ÖÂËÀÍö£¬ÏÂÃæÂß¼­²»»áÖ´ĞĞ£©
-        if (hp > 0)
+        // ä½¿ç”¨è®°å½•çš„ currentVoidCollider ç”Ÿæˆæ¡¥æ¢ï¼ˆç²¾ç¡®åŒ¹é…Voidä½ç½®ï¼‰
+        if (currentVoidCollider != null)
         {
+            if (bridgePrefab != null)
+                Instantiate(bridgePrefab, currentVoidCollider.transform.position, currentVoidCollider.transform.rotation);
+
+            // é”€æ¯Voidç‰©ä½“
+            Destroy(currentVoidCollider.gameObject);
+
+            // ğŸ”´ é‡è¦ï¼šæ‰‹åŠ¨é‡ç½®çŠ¶æ€ï¼ˆå› ä¸ºDestroyä¸ä¼šè§¦å‘OnTriggerExitï¼‰
+            isInVoidZone = false;
+            currentVoidCollider = null;
+        }
+        else
+        {
+            // å¤‡ç”¨æ–¹æ¡ˆï¼šå¦‚æœTriggeræ²¡æ£€æµ‹åˆ°ä½†ç©å®¶æŒ‰äº†ï¼ˆä¿é™©èµ·è§ï¼‰
             Collider[] voids = Physics.OverlapSphere(transform.position, 2.0f);
             foreach (var v in voids)
             {
@@ -154,8 +239,11 @@ public class PlayerInteraction : MonoBehaviour
                     break;
                 }
             }
+        }
 
-            // Ë²ÒÆ»ØÖØÉúµã
+        // åªæœ‰æ´»ç€çš„æ—¶å€™æ‰ä¼ é€
+        if (hp > 0)
+        {
             CharacterController cc = GetComponent<CharacterController>();
             if (cc != null) cc.enabled = false;
             transform.position = spawnPoint;
@@ -164,27 +252,15 @@ public class PlayerInteraction : MonoBehaviour
         }
         else
         {
-            // HP=1Ê±ÎşÉüµ¼ÖÂËÀÍö£ºÉú³ÉÇÅÁºµ«²»´«ËÍ£¨ÒòÎªÒÑ¾­ËÀÁË£©
-            // µ«ÈÔÈ»Éú³ÉÇÅÁº£¨×÷ÎªÍæ¼Ò×îºóµÄ¹±Ï×£©
-            Collider[] voids = Physics.OverlapSphere(transform.position, 2.0f);
-            foreach (var v in voids)
-            {
-                if (v.CompareTag("Void"))
-                {
-                    if (bridgePrefab != null)
-                        Instantiate(bridgePrefab, v.transform.position, v.transform.rotation);
-                    Destroy(v.gameObject);
-                    break;
-                }
-            }
-            Debug.Log("Íæ¼ÒÒÔ×îºóµÄÉúÃüÎª´ú¼Û½¨ÔìÁËÇÅÁº");
+            // HP=1æ—¶ç‰ºç‰²å¯¼è‡´æ­»äº¡ï¼šæ¡¥æ¢å·²ç”Ÿæˆï¼Œä½†ä¸ä¼ é€
+            Debug.Log("ç©å®¶ä»¥æœ€åçš„ç”Ÿå‘½ä¸ºä»£ä»·å»ºé€ äº†æ¡¥æ¢");
         }
 
         currentHoldTime = 0;
         isSacrificing = false;
     }
 
-    // --- Ê°È¡ÓëÍ¶ÖÀÏµÍ³Âß¼­£¨±£³Ö²»±ä£©---
+    // --- æ‹¾å–ä¸æŠ•æ·ç³»ç»Ÿé€»è¾‘ ---
     void TryPickUp()
     {
         Vector3 detectCenter = transform.position + transform.forward * interactRange;
@@ -251,8 +327,28 @@ public class PlayerInteraction : MonoBehaviour
             }
             grabbedItem = null;
         }
+
+        // ğŸ”´ å¯é€‰ï¼šæ‰”ç®±å­åï¼Œå¦‚æœä¹‹å‰åœ¨VoidåŒºåŸŸé™„è¿‘ï¼Œå¼ºåˆ¶åˆ·æ–°ä¸€æ¬¡çŠ¶æ€
+        // è¿™é˜²æ­¢ç®±å­æ‰”è¿›Voidåï¼Œç”±äºç‰©ç†ç¢°æ’å»¶è¿Ÿå¯¼è‡´çŠ¶æ€æ®‹ç•™
+        if (isInVoidZone && currentVoidCollider != null)
+        {
+            // å»¶è¿Ÿä¸€å¸§æ£€æŸ¥ï¼Œç¡®ä¿ç‰©ç†ç¢°æ’å…ˆå‘ç”Ÿï¼ˆç®±å­å…ˆè¿›å…¥Voidï¼‰
+            StartCoroutine(DelayedVoidCheck());
+        }
+
         isChargingThrow = false;
         if (aimLine != null) aimLine.enabled = false;
+    }
+
+    // è¾…åŠ©åç¨‹ï¼šå»¶è¿Ÿæ£€æŸ¥Voidæ˜¯å¦è¢«ç®±å­å¡«è¡¥
+    System.Collections.IEnumerator DelayedVoidCheck()
+    {
+        yield return null; // ç­‰å¾…ä¸€å¸§
+        if (currentVoidCollider == null && isInVoidZone)
+        {
+            isInVoidZone = false;
+            ResetSacrificeProgress();
+        }
     }
 
     private void UpdateAimLine()
@@ -271,16 +367,6 @@ public class PlayerInteraction : MonoBehaviour
         }
     }
 
-    bool IsNearVoid()
-    {
-        Collider[] hitColliders = Physics.OverlapSphere(transform.position, 1.5f);
-        foreach (var hit in hitColliders)
-        {
-            if (hit.CompareTag("Void")) return true;
-        }
-        return false;
-    }
-
     void ResetSacrificeProgress()
     {
         currentHoldTime = 0;
@@ -293,5 +379,10 @@ public class PlayerInteraction : MonoBehaviour
         Gizmos.DrawWireSphere(transform.position + transform.forward * interactRange, detectRadius);
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(transform.position, 1.5f);
+
+        // æ–°å¢ï¼šåœ¨Sceneè§†å›¾ä¸­æ˜¾ç¤ºå½“å‰é‡ç”Ÿç‚¹ä½ç½®
+        Gizmos.color = Color.green;
+        Gizmos.DrawWireSphere(spawnPoint, 0.5f);
+        Gizmos.DrawLine(transform.position, spawnPoint);
     }
 }
