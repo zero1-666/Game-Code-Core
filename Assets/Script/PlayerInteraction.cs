@@ -14,7 +14,7 @@ public class PlayerInteraction : MonoBehaviour
     public GameObject bridgePrefab;
 
     [Header("重生点系统")]
-    public Vector3 spawnPoint;
+    public Vector3 spawnPoint; // 保留字段，但牺牲后不再使用（死亡时仍用）
 
     [Header("实时状态")]
     [SerializeField] private GameObject grabbedItem;
@@ -40,7 +40,7 @@ public class PlayerInteraction : MonoBehaviour
 
     void Start()
     {
-        // 如果启用了检查点系统且 spawnPoint 未设置，自动寻找起始检查点
+        // 检查点初始化（保留，死亡时仍需要）
         if (spawnPoint == Vector3.zero)
         {
             GameObject startPoint = GameObject.Find("Start_SpawnPoint")
@@ -54,7 +54,6 @@ public class PlayerInteraction : MonoBehaviour
             }
             else
             {
-                // 如果没有找到检查点，使用当前位置
                 spawnPoint = transform.position;
             }
         }
@@ -73,13 +72,10 @@ public class PlayerInteraction : MonoBehaviour
 
     void Update()
     {
-        // 如果已死亡，禁止所有操作
         if (isDead) return;
-
-        // 如果GameOver面板已激活，也禁止操作（双重保险）
         if (UIManager.Instance != null && UIManager.Instance.gameOverPanel.activeSelf) return;
 
-        // 🔴 关键修复：如果记录的 Void 已被销毁（如被箱子填补），但状态未重置，自动清理
+        // 防御性检查：Void 被销毁后重置状态
         if (currentVoidCollider == null && isInVoidZone)
         {
             isInVoidZone = false;
@@ -90,17 +86,14 @@ public class PlayerInteraction : MonoBehaviour
         HandleSacrificeInput();
     }
 
-    // --- 检查点系统核心方法 ---
-    /// <summary>
-    /// 更新重生点位置（供 Checkpoint.cs 调用）
-    /// </summary>
+    // 检查点系统（保留，死亡时仍需要）
     public void UpdateSpawnPoint(Vector3 newPosition)
     {
         spawnPoint = newPosition;
         Debug.Log($"<color=green>重生点已更新至：{newPosition}</color>");
     }
 
-    // --- Trigger 检测（Void 区域）---
+    // Trigger 检测（Void 区域）
     void OnTriggerEnter(Collider other)
     {
         if (other.CompareTag("Void"))
@@ -108,7 +101,6 @@ public class PlayerInteraction : MonoBehaviour
             isInVoidZone = true;
             currentVoidCollider = other;
 
-            // 可选：提示玩家可以牺牲
             if (UIManager.Instance != null && hp > 1)
             {
                 UIManager.Instance.ShowHint("按住空格牺牲生命值建造桥梁");
@@ -126,7 +118,7 @@ public class PlayerInteraction : MonoBehaviour
         }
     }
 
-    // --- 生命值逻辑 ---
+    // 生命值逻辑
     public void TakeDamage(int amount)
     {
         if (isDead) return;
@@ -151,37 +143,33 @@ public class PlayerInteraction : MonoBehaviour
 
         Debug.Log("<color=red>玩家已死亡</color>");
 
-        // 禁用角色控制器
         CharacterController cc = GetComponent<CharacterController>();
         if (cc != null) cc.enabled = false;
 
-        // 如果有刚体，也禁用
         Rigidbody rb = GetComponent<Rigidbody>();
         if (rb != null) rb.isKinematic = true;
 
-        // 触发延迟显示的GameOver
         if (UIManager.Instance != null)
         {
             UIManager.Instance.TriggerGameOver();
         }
     }
 
-    // --- 牺牲逻辑（已修复）---
+    // 牺牲逻辑
     void HandleSacrificeInput()
     {
-        // 🔴 关键修复：如果 Void 被销毁了（currentVoidCollider为null），强制退出牺牲状态
+        // 防御性检查：Void 被销毁后强制退出
         if (currentVoidCollider == null && isInVoidZone)
         {
             isInVoidZone = false;
             ResetSacrificeProgress();
-            return; // 直接返回，不执行后续逻辑
+            return;
         }
 
         if (isInVoidZone && grabbedItem == null)
         {
             if (Input.GetKey(KeyCode.Space))
             {
-                // HP为1时的临终警告
                 if (hp == 1 && currentHoldTime == 0)
                 {
                     if (UIManager.Instance != null)
@@ -208,26 +196,31 @@ public class PlayerInteraction : MonoBehaviour
         }
     }
 
+    // 🔴🔴🔴 核心修改：ExecuteSacrifice 🔴🔴🔴
     void ExecuteSacrifice()
     {
         TakeDamage(1);
 
-        // 使用记录的 currentVoidCollider 生成桥梁（精确匹配Void位置）
+        // 生成桥梁（在原地生成，玩家不传送）
         if (currentVoidCollider != null)
         {
             if (bridgePrefab != null)
-                Instantiate(bridgePrefab, currentVoidCollider.transform.position, currentVoidCollider.transform.rotation);
+            {
+                // 可选：稍微抬高一点生成，避免与玩家碰撞穿模
+                Vector3 bridgePos = currentVoidCollider.transform.position;
+                // 如果需要可以取消下面这行的注释，让桥在玩家脚下生成
+                // bridgePos.y = transform.position.y - 0.1f; 
 
-            // 销毁Void物体
+                Instantiate(bridgePrefab, bridgePos, currentVoidCollider.transform.rotation);
+            }
+
             Destroy(currentVoidCollider.gameObject);
-
-            // 🔴 重要：手动重置状态（因为Destroy不会触发OnTriggerExit）
             isInVoidZone = false;
             currentVoidCollider = null;
         }
         else
         {
-            // 备用方案：如果Trigger没检测到但玩家按了（保险起见）
+            // 备用方案
             Collider[] voids = Physics.OverlapSphere(transform.position, 2.0f);
             foreach (var v in voids)
             {
@@ -241,26 +234,36 @@ public class PlayerInteraction : MonoBehaviour
             }
         }
 
-        // 只有活着的时候才传送
-        if (hp > 0)
+        // 🔴🔴🔴 删除的代码：传送回重生点 🔴🔴🔴
+        // 以下代码已被删除：
+        // if (hp > 0)
+        // {
+        //     CharacterController cc = GetComponent<CharacterController>();
+        //     if (cc != null) cc.enabled = false;
+        //     transform.position = spawnPoint;  // ❌ 不再传送！
+        //     Physics.SyncTransforms();
+        //     if (cc != null) cc.enabled = true;
+        // }
+        // else
+        // {
+        //     Debug.Log("玩家以最后的生命为代价建造了桥梁");
+        // }
+
+        // 保留：如果死亡（hp<=0），TakeDamage 中已经调用了 Die()
+        // 但这里可以加个提示
+
+
+
+        if (hp <= 0)
         {
-            CharacterController cc = GetComponent<CharacterController>();
-            if (cc != null) cc.enabled = false;
-            transform.position = spawnPoint;
-            Physics.SyncTransforms();
-            if (cc != null) cc.enabled = true;
-        }
-        else
-        {
-            // HP=1时牺牲导致死亡：桥梁已生成，但不传送
-            Debug.Log("玩家以最后的生命为代价建造了桥梁");
+            Debug.Log("玩家以最后的生命为代价建造了桥梁，留在原地");
         }
 
         currentHoldTime = 0;
         isSacrificing = false;
     }
 
-    // --- 拾取与投掷系统逻辑 ---
+    // 拾取与投掷系统逻辑（保持不变）
     void TryPickUp()
     {
         Vector3 detectCenter = transform.position + transform.forward * interactRange;
@@ -328,11 +331,8 @@ public class PlayerInteraction : MonoBehaviour
             grabbedItem = null;
         }
 
-        // 🔴 可选：扔箱子后，如果之前在Void区域附近，强制刷新一次状态
-        // 这防止箱子扔进Void后，由于物理碰撞延迟导致状态残留
         if (isInVoidZone && currentVoidCollider != null)
         {
-            // 延迟一帧检查，确保物理碰撞先发生（箱子先进入Void）
             StartCoroutine(DelayedVoidCheck());
         }
 
@@ -340,10 +340,9 @@ public class PlayerInteraction : MonoBehaviour
         if (aimLine != null) aimLine.enabled = false;
     }
 
-    // 辅助协程：延迟检查Void是否被箱子填补
     System.Collections.IEnumerator DelayedVoidCheck()
     {
-        yield return null; // 等待一帧
+        yield return null;
         if (currentVoidCollider == null && isInVoidZone)
         {
             isInVoidZone = false;
@@ -380,7 +379,6 @@ public class PlayerInteraction : MonoBehaviour
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(transform.position, 1.5f);
 
-        // 新增：在Scene视图中显示当前重生点位置
         Gizmos.color = Color.green;
         Gizmos.DrawWireSphere(spawnPoint, 0.5f);
         Gizmos.DrawLine(transform.position, spawnPoint);
